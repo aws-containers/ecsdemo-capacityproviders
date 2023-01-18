@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 
-# cdk: 1.41.0
+import aws_cdk as cdk
 from aws_cdk import (
     aws_ec2,
     aws_ecs,
     aws_ecs_patterns,
     aws_servicediscovery,
     aws_iam,
-    core,
 )
 
 from os import getenv
-
+from aws_cdk import App, Stack
+from constructs import Construct
 
 # Creating a construct that will populate the required objects created in the platform repo such as vpc, ecs cluster, and service discovery namespace
-class BasePlatform(core.Construct):
-    
-    def __init__(self, scope: core.Construct, id: str, **kwargs):
+class BasePlatform(Construct):
+
+    def __init__(self, scope: Construct, id: str, **kwargs):
         super().__init__(scope, id, **kwargs)
         self.environment_name = 'ecsworkshop'
 
@@ -25,30 +25,30 @@ class BasePlatform(core.Construct):
             self, "VPC",
             vpc_name='{}-base/BaseVPC'.format(self.environment_name)
         )
-        
+
         self.sd_namespace = aws_servicediscovery.PrivateDnsNamespace.from_private_dns_namespace_attributes(
             self, "SDNamespace",
-            namespace_name=core.Fn.import_value('NSNAME'),
-            namespace_arn=core.Fn.import_value('NSARN'),
-            namespace_id=core.Fn.import_value('NSID')
+            namespace_name=cdk.Fn.import_value('NSNAME'),
+            namespace_arn=cdk.Fn.import_value('NSARN'),
+            namespace_id=cdk.Fn.import_value('NSID')
         )
-        
+
         # If using EC2 backed, this will take all security groups assigned to the cluster nodes and create a list
         # This list will be used when importing the cluster
-        cluster_output_sec_grp = core.Fn.import_value('ECSSecGrpList')
-        
+        cluster_output_sec_grp = cdk.Fn.import_value('ECSSecGrpList')
+
         self.ecs_cluster = aws_ecs.Cluster.from_cluster_attributes(
             self, "ECSCluster",
-            cluster_name=core.Fn.import_value('ECSClusterName'),
+            cluster_name=cdk.Fn.import_value('ECSClusterName'),
             security_groups=[aws_ec2.SecurityGroup.from_security_group_id(self, "ClusterSecGrp", cluster_output_sec_grp)],
             vpc=self.vpc,
             default_cloud_map_namespace=self.sd_namespace
         )
-        
 
-class CapacityProviderEC2Service(core.Stack):
-    
-    def __init__(self, scope: core.Stack, id: str, **kwargs):
+
+class CapacityProviderEC2Service(Stack):
+
+    def __init__(self, scope: Stack, id: str, **kwargs):
         super().__init__(scope, id, **kwargs)
 
         self.base_platform = BasePlatform(self, self.stack_name)
@@ -72,10 +72,10 @@ class CapacityProviderEC2Service(core.Stack):
             public_load_balancer=True,
             task_image_options=self.task_image,
         )
-        
+
         # Update Target group settings for Spot instances to adjust deregistration delay to less than 120 sec.
         # Adjust healthy threshold  to 2 to reduce the time for a new task to be healthy in 1 minute
-        
+
         self.cfn_target_group = self.load_balanced_service.node.find_child('LB'
                                 ).node.find_child('PublicListener'
                                 ).node.find_child('ECSGroup'
@@ -86,9 +86,9 @@ class CapacityProviderEC2Service(core.Stack):
         # This should work, but the default child is not the service cfn, it's a list of cfn service and sec group
         #self.cfn_resource = self.load_balanced_service.service.node.default_child
         self.cfn_resource = self.load_balanced_service.service.node.children[0]
-        
+
         self.cfn_resource.add_deletion_override("Properties.LaunchType")
-            
+
         self.load_balanced_service.task_definition.add_to_task_role_policy(
             aws_iam.PolicyStatement(
                 actions=[
@@ -98,11 +98,11 @@ class CapacityProviderEC2Service(core.Stack):
                 resources=['*']
             )
         )
-        
 
-_env = core.Environment(account=getenv('AWS_ACCOUNT_ID'), region=getenv('AWS_DEFAULT_REGION'))
+
+_env = cdk.Environment(account=getenv('AWS_ACCOUNT_ID'), region=getenv('AWS_DEFAULT_REGION'))
 environment = "ecsworkshop"
 stack_name = "{}-capacityproviders-ec2".format(environment)
-app = core.App()
+app = cdk.App()
 CapacityProviderEC2Service(app, stack_name, env=_env)
 app.synth()
